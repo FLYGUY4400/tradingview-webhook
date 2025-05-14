@@ -5,7 +5,7 @@ import sys
 import time
 import os
 import logging
-from load_env import load_environment
+from topstepapi.load_env import load_environment
 
 # Enable debug logging
 logging.basicConfig(level=logging.DEBUG)
