@@ -32,7 +32,7 @@ pip install .
 ```python
 from topstepapi import TopstepClient
 
-username = "YOUR_USERNAME"
+username = "flyguy4400"
 api_key = "YOUR_API_KEY"
 
 client = TopstepClient(username, api_key)

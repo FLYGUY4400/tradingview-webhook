@@ -1,19 +1,43 @@
 from signalrcore.hub_connection_builder import HubConnectionBuilder
+from urllib.parse import quote
 import signal
 import sys
 import time
+import os
+import logging
+from load_env import load_environment
+
+# Enable debug logging
+logging.basicConfig(level=logging.DEBUG)
+
+# Load environment variables
+load_environment()
+
+# Get credentials from environment
+JWT_TOKEN = os.getenv("TOPSTEPX_SESSION_TOKEN")
+
+CONTRACT_ID = "CON.F.US.MNQ.M25"
 
 class MarketDataClient:
     def __init__(self, token: str, contract_id: str):
-        base_url = "https://gateway-rtc-demo.s2f.projectx.com/hubs/"
+        if not token:
+            raise ValueError("Token cannot be empty")
+            
+        # Use wss:// for WebSocket connections
+        base_url = "wss://rtc.topstepx.com/hubs/"
         self.contract_id = contract_id
-        self.hub_url = f"{base_url}market?access_token={token}"
+        
+        # URL encode the token to handle special characters
+        encoded_token = quote(token)
+        self.hub_url = f"{base_url}market?access_token={encoded_token}"
+        
         self.connection = HubConnectionBuilder()\
             .with_url(self.hub_url)\
             .with_automatic_reconnect({
                 "type": "raw",
                 "keep_alive_interval": 10,
-                "reconnect_interval": 5
+                "reconnect_interval": 5,
+                "max_attempts": 5
             })\
             .build()
 
@@ -57,10 +81,6 @@ class MarketDataClient:
         contract_id, data = args
         print("[DEPTH]", contract_id, data)
 
-
-# Replace these with your actual credentials and contract
-JWT_TOKEN = "your_bearer_token"
-CONTRACT_ID = "CON.F.US.RTY.H25"
 
 client = MarketDataClient(JWT_TOKEN, CONTRACT_ID)
 
