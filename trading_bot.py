@@ -94,41 +94,6 @@ class TradingBot:
         )
         logger.info(f"Placed {side} for account {self.account_id} with order id {entry_order}")
         
-        max_retries = 5
-        base_delay =1 
-
-        for attempt in range(max_retries): 
-            # Wait with exponential backoff
-            try: 
-                delay = base_delay * (2 ** attempt)
-                logger.info(f"Waiting {delay} seconds before attempting to modify order (attempt {attempt+1}/{max_retries})...")
-                time.sleep(delay)
-                
-                # Try to modify the order
-                self.order_api.modify_order(
-                    account_id=self.account_id,
-                    order_id=entry_order,
-                    stop_price=float(sl_price),
-                    limit_price=float(tp_price)
-                )
-                
-                logger.info(f"Successfully modified order with TP at {tp_price} and SL at {sl_price}")
-                break  # Success, exit the retry loop
-                
-            except Exception as e:
-                if "Order not found" in str(e) and attempt < max_retries - 1:
-                    logger.warning(f"Order not found, retrying... ({attempt+1}/{max_retries})")
-                    continue  # Try again with longer delay
-                else:
-                    # Either it's not an "Order not found" error or we've exhausted our retries
-                    logger.error(f"Failed to modify order after {attempt+1} attempts: {e}")
-                    raise  # Re-raise th
-      
-        logger.info(f"Placed TP order at {tp_price}")
-        logger.info(f"Placed SL order at {sl_price}")
-        
-      
-        
         # Track orders
         self.current_orders = {
             "entry": entry_order,
