@@ -7,13 +7,17 @@
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <!-- Luxon for time handling -->
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1/build/global/luxon.min.js"></script>
     <!-- Chart.js adapter for Luxon -->
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.2.0/dist/chartjs-adapter-luxon.min.js"></script>
     <!-- Candlestick plugin for Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.1.1/dist/chartjs-chart-financial.min.js"></script>
+    <!-- Hammer.js for touch gestures -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <!-- Chart.js Zoom plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
     <style>
         body {
             padding: 20px;
@@ -105,7 +109,7 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Real-time Bar Formation</h5>
+                        <h5 class="card-title">Real-time Price Action</h5>
                         <div class="d-flex justify-content-between mb-2">
                             <div>
                                 <span class="badge bg-secondary">Time:</span>
@@ -132,8 +136,9 @@
                                 <span id="rt-volume">--</span>
                             </div>
                         </div>
-                        <div class="progress" style="height: 30px;">
-                            <div id="rt-progress-bar" class="progress-bar" role="progressbar" style="width: 0%;"></div>
+                        <!-- Real-time candlestick chart -->
+                        <div style="height: 200px;">
+                            <canvas id="realtime-chart"></canvas>
                         </div>
                     </div>
                 </div>
@@ -153,8 +158,10 @@
         // Global variables
         let priceChart;
         let volumeChart;
+        let realtimeChart;
         let currentContract = 'CON.F.US.MNQ.M25';
         let refreshInterval;
+        let realtimeBars = [];
         
         // DOM elements
         const contractInput = document.getElementById('contract-input');
@@ -168,6 +175,7 @@
         
         // Initialize charts
         function initCharts() {
+            console.log('Initializing charts...');
             // Set Chart.js defaults for dark mode
             Chart.defaults.color = '#f8f9fa';
             Chart.defaults.borderColor = '#495057';
@@ -206,6 +214,9 @@
                             },
                             grid: {
                                 color: '#495057'
+                            },
+                            ticks: {
+                                maxRotation: 0
                             }
                         },
                         y: {
@@ -216,7 +227,8 @@
                             },
                             grid: {
                                 color: '#495057'
-                            }
+                            },
+                            position: 'right'
                         }
                     },
                     plugins: {
@@ -256,9 +268,7 @@
                     datasets: [{
                         label: 'Volume',
                         data: [],
-                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1
+                        backgroundColor: '#6c757d'
                     }]
                 },
                 options: {
@@ -299,6 +309,73 @@
                             display: true,
                             text: 'Volume Chart',
                             color: '#f8f9fa'
+                        }
+                    }
+                }
+            });
+            
+            // Real-time chart
+            const realtimeCtx = document.getElementById('realtime-chart').getContext('2d');
+            realtimeChart = new Chart(realtimeCtx, {
+                type: 'candlestick',
+                data: {
+                    datasets: [{
+                        label: 'Real-time',
+                        data: [],
+                        color: {
+                            up: '#28a745',
+                            down: '#dc3545',
+                            unchanged: '#6c757d'
+                        }
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 0 // Disable animation for real-time updates
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute',
+                                displayFormats: {
+                                    minute: 'HH:mm:ss'
+                                }
+                            },
+                            ticks: {
+                                maxRotation: 0,
+                                autoSkip: false
+                            },
+                            grid: {
+                                color: '#495057'
+                            }
+                        },
+                        y: {
+                            position: 'right',
+                            grid: {
+                                color: '#495057'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const point = context.raw;
+                                    return [
+                                        `Open: ${point.o}`,
+                                        `High: ${point.h}`,
+                                        `Low: ${point.l}`,
+                                        `Close: ${point.c}`,
+                                        `Volume: ${point.v}`
+                                    ];
+                                }
+                            }
                         }
                     }
                 }
@@ -382,13 +459,35 @@
             }
             
             // Update price chart
+            console.log('Updating price chart with data:', priceData.slice(0, 2));
             priceChart.data.datasets[0].data = priceData;
-            priceChart.update();
             
             // Update volume chart
-            volumeChart.data.labels = volumeLabels;
+            console.log('Updating volume chart with data:', volumeData.slice(0, 2));
             volumeChart.data.datasets[0].data = volumeData;
-            volumeChart.update();
+            
+            try {
+                priceChart.update();
+                console.log('Price chart updated successfully');
+            } catch (error) {
+                console.error('Error updating price chart:', error);
+            }
+            
+            try {
+                volumeChart.update();
+                console.log('Volume chart updated successfully');
+            } catch (error) {
+                console.error('Error updating volume chart:', error);
+            }
+            
+            // Store the last 10 bars for real-time chart
+            realtimeBars = bars.slice(-10);
+            
+            // Update real-time chart with the latest bar
+            if (bars.length > 0) {
+                const latestBar = bars[bars.length - 1];
+                updateRealtimeBar(latestBar);
+            }
         }
         
         // Update price information
@@ -454,7 +553,6 @@
             const lowEl = document.getElementById('rt-low');
             const currentEl = document.getElementById('rt-current');
             const volumeEl = document.getElementById('rt-volume');
-            const progressBar = document.getElementById('rt-progress-bar');
             
             // Parse bar data
             const time = bar.time;
@@ -476,19 +574,60 @@
             currentEl.textContent = current.toFixed(2);
             volumeEl.textContent = volume;
             
-            // Calculate progress bar color and width
-            const isUp = current >= open;
-            const color = isUp ? 'bg-success' : 'bg-danger';
-            
-            // Calculate width based on position within high-low range
-            let width = 50; // Default to middle
-            if (high !== low) {
-                width = ((current - low) / (high - low)) * 100;
+            // Update real-time chart
+            updateRealtimeChart(bar);
+        }
+        
+        // Update real-time chart
+        function updateRealtimeChart(newBar) {
+            console.log('Updating real-time chart with bar:', newBar);
+            if (!newBar) {
+                console.warn('No bar data provided for real-time chart');
+                return;
+            }
+            if (!realtimeChart) {
+                console.error('Real-time chart not initialized');
+                return;
             }
             
-            // Update progress bar
-            progressBar.style.width = `${width}%`;
-            progressBar.className = `progress-bar ${color}`;
+            // Convert bar to Chart.js format
+            const chartBar = {
+                x: new Date(newBar.time),
+                o: parseFloat(newBar.open || 0),
+                h: parseFloat(newBar.high || 0),
+                l: parseFloat(newBar.low || 0),
+                c: parseFloat(newBar.close || 0),
+                v: parseInt(newBar.volume || 0)
+            };
+            
+            // Keep only the last 10 bars for real-time display
+            const existingData = realtimeChart.data.datasets[0].data;
+            
+            // Check if we have a bar with the same timestamp
+            const existingBarIndex = existingData.findIndex(bar => 
+                bar.x.getTime() === chartBar.x.getTime());
+            
+            if (existingBarIndex >= 0) {
+                // Update existing bar
+                existingData[existingBarIndex] = chartBar;
+            } else {
+                // Add new bar
+                existingData.push(chartBar);
+                
+                // Keep only the last 10 bars
+                if (existingData.length > 10) {
+                    existingData.shift();
+                }
+            }
+            
+            // Update chart
+            console.log('Real-time chart data before update:', realtimeChart.data.datasets[0].data);
+            try {
+                realtimeChart.update();
+                console.log('Real-time chart updated successfully');
+            } catch (error) {
+                console.error('Error updating real-time chart:', error);
+            }
         }
         
         // Set up auto-refresh
