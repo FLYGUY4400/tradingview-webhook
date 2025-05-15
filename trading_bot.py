@@ -4,9 +4,12 @@ import logging
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Dict, List
+import uuid 
+import json
 
 from topstepapi import TopstepClient
 from topstepapi.load_env import load_environment
+from topstepapi.order import OrderAPI
 
 # Configure logging
 logging.basicConfig(
@@ -25,18 +28,19 @@ class TradingBot:
             username=os.getenv("TOPSTEPX_USERNAME"),
             api_key=os.getenv("TOPSTEPX_API_KEY")
         )
-        
+        self.order_api = OrderAPI(token=os.getenv("TOPSTEPX_SESSION_TOKEN"), base_url=os.getenv("TOPSTEP_BASE_URL"))
         # Trading parameters
         self.contract_id = "CON.F.US.MNQ.M25"  # Micro E-mini Nasdaq-100 Futures
-        self.tp_points = 10  # Take profit in points
-        self.sl_points = 5   # Stop loss in points
+        self.tp_points = Decimal("25")  # Take profit $50 / $2 per point
+        self.sl_points = Decimal("12.5")   # Stop loss $25 / $2 per point
         self.position_size = 1  # Number of contracts
         
         # State management
         self.account_id: Optional[int] = None
         self.current_position = 0
         self.current_orders: Dict[str, dict] = {}
-        self.last_price: Optional[Decimal] = None
+        self.latest_trade_price: Optional[Decimal] = None
+        self.trade_placed_this_session: bool = False
         
     def setup(self):
         """Initialize trading setup"""
@@ -73,38 +77,57 @@ class TradingBot:
         if side == "buy":
             tp_price = entry_price + self.tp_points
             sl_price = entry_price - self.sl_points
+            side_num = 0
         else:
             tp_price = entry_price - self.tp_points
             sl_price = entry_price + self.sl_points
-            
+            side_num = 1
+      
         # Place entry order
-        entry_order = self.client.order.place_market_order(
+        entry_order =self.order_api.place_order(
             account_id=self.account_id,
             contract_id=self.contract_id,
-            side=side,
-            quantity=self.position_size
+            type=2,
+            side=side_num,
+            size=self.position_size          
+            
         )
-        logger.info(f"Placed {side} order: {entry_order['id']}")
+        logger.info(f"Placed {side} for account {self.account_id} with order id {entry_order}")
         
-        # Place TP order
-        tp_order = self.client.order.place_limit_order(
-            account_id=self.account_id,
-            contract_id=self.contract_id,
-            side="sell" if side == "buy" else "buy",
-            quantity=self.position_size,
-            price=tp_price
-        )
-        logger.info(f"Placed TP order at {tp_price}: {tp_order['id']}")
+        max_retries = 5
+        base_delay =1 
+
+        for attempt in range(max_retries): 
+            # Wait with exponential backoff
+            try: 
+                delay = base_delay * (2 ** attempt)
+                logger.info(f"Waiting {delay} seconds before attempting to modify order (attempt {attempt+1}/{max_retries})...")
+                time.sleep(delay)
+                
+                # Try to modify the order
+                self.order_api.modify_order(
+                    account_id=self.account_id,
+                    order_id=entry_order,
+                    stop_price=float(sl_price),
+                    limit_price=float(tp_price)
+                )
+                
+                logger.info(f"Successfully modified order with TP at {tp_price} and SL at {sl_price}")
+                break  # Success, exit the retry loop
+                
+            except Exception as e:
+                if "Order not found" in str(e) and attempt < max_retries - 1:
+                    logger.warning(f"Order not found, retrying... ({attempt+1}/{max_retries})")
+                    continue  # Try again with longer delay
+                else:
+                    # Either it's not an "Order not found" error or we've exhausted our retries
+                    logger.error(f"Failed to modify order after {attempt+1} attempts: {e}")
+                    raise  # Re-raise th
+      
+        logger.info(f"Placed TP order at {tp_price}")
+        logger.info(f"Placed SL order at {sl_price}")
         
-        # Place SL order
-        sl_order = self.client.order.place_stop_order(
-            account_id=self.account_id,
-            contract_id=self.contract_id,
-            side="sell" if side == "buy" else "buy",
-            quantity=self.position_size,
-            stop_price=sl_price
-        )
-        logger.info(f"Placed SL order at {sl_price}: {sl_order['id']}")
+      
         
         # Track orders
         self.current_orders = {
@@ -113,18 +136,7 @@ class TradingBot:
             "sl": sl_order
         }
 
-    def handle_quote(self, contract_id: str, data: dict):
-        """Handle incoming market data quotes"""
-        if contract_id != self.contract_id:
-            return
-            
-        bid_price = Decimal(str(data.get("bidPrice", 0)))
-        ask_price = Decimal(str(data.get("askPrice", 0)))
-        self.last_price = (bid_price + ask_price) / 2
-        
-        # Implement your trading logic here
-        # For example, simple moving average crossover, RSI, etc.
-        # This is where you would call place_trade() when your conditions are met
+
 
     def run(self):
         """Main trading loop"""
@@ -133,21 +145,30 @@ class TradingBot:
             self.setup()
             
             # Connect to market data
-            from tests.test_market_hub import MarketDataClient
+            from topstepapi.market_data import MarketDataClient
             market_data = MarketDataClient(
                 token=os.getenv("TOPSTEPX_SESSION_TOKEN"),
-                contract_id=self.contract_id
+                contract_id=self.contract_id,
+                on_trade_callback=self._handle_market_trade # Register our new trade handler
             )
             
             # Register callbacks
-            market_data.connection.on("GatewayQuote", self.handle_quote)
+            # self.handle_quote is removed, using trade updates instead
+            # market_data.connection.on("GatewayQuote", self.handle_quote)
             
             # Start market data stream
             market_data.start()
             logger.info("Trading bot started")
             
             # Keep the main thread running
+            # The trade placement logic is now event-driven by _handle_market_trade
             while True:
+                if self.trade_placed_this_session:
+                    logger.info("Trade placed and bot is now idle. Monitoring position (manual). Press Ctrl+C to exit.")
+                    # Bot will just idle here until manually stopped or further logic is added for position management
+                    # For a real bot, you'd monitor self.current_orders, position status, etc.
+                    while True:
+                        time.sleep(60) # Sleep longer once trade is placed
                 time.sleep(1)
                 
         except KeyboardInterrupt:
@@ -157,6 +178,56 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error: {str(e)}")
             raise
+
+
+    def _handle_market_trade(self, args: List):
+        """Handle incoming trade data from MarketDataClient callback."""
+        try:
+            contract_id_from_stream, trade_data_list = args
+            if contract_id_from_stream != self.contract_id or not trade_data_list:
+                return
+
+            # Assuming trade_data_list is a list of trades, get the last one
+            # And that each trade is a dict with a 'price' key
+            last_trade = trade_data_list[-1]
+            if isinstance(last_trade, dict) and 'price' in last_trade:
+                self.latest_trade_price = Decimal(str(last_trade['price']))
+                logger.info(f"Latest MNQ trade price updated: {self.latest_trade_price}")
+
+                # Attempt to place the trade if price is available and not already placed
+                if self.latest_trade_price is not None and not self.trade_placed_this_session:
+                    self._attempt_place_long_market_order()
+            else:
+                logger.warning(f"Received trade data in unexpected format: {last_trade}")
+
+        except Exception as e:
+            logger.error(f"Error in _handle_market_trade: {e}", exc_info=True)
+
+    def _attempt_place_long_market_order(self):
+        """Attempts to place a long market order with TP/SL if conditions are met."""
+        if self.trade_placed_this_session:
+            logger.info("Trade already attempted/placed this session.")
+            return
+
+        if self.account_id is None:
+            logger.error("Account ID not set. Cannot place trade.")
+            return
+
+        if self.latest_trade_price is None:
+            logger.warning("Latest market price not available. Cannot calculate TP/SL or place trade.")
+            return
+
+        logger.info(f"Attempting to place LONG market order for {self.contract_id} at observed price ~{self.latest_trade_price}")
+        try:
+            # Call the existing place_trade method which handles market entry and TP/SL placement
+            self.place_trade(side="buy", entry_price=self.latest_trade_price) # entry_price here is for TP/SL calc
+            self.trade_placed_this_session = True # Mark as placed to prevent re-triggering
+            logger.info("Long market order with TP/SL successfully initiated.")
+        except Exception as e:
+            logger.error(f"Error placing long market order with TP/SL: {e}", exc_info=True)
+            # Optionally, you might want to retry or handle this error more gracefully
+            # For now, we'll still mark as attempted to avoid spamming orders if it's a persistent issue.
+            self.trade_placed_this_session = True 
 
 if __name__ == "__main__":
     bot = TradingBot()
