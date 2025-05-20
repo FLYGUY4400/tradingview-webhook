@@ -1,4 +1,5 @@
 import requests
+from decimal import Decimal 
 
 class OrderAPI:
     def __init__(self, token: str, base_url: str):
@@ -56,11 +57,11 @@ class OrderAPI:
         type: int,
         side: int,
         size: int,
-        limit_price=None,
-        stop_price=None,
-        trail_price=None,
-        custom_tag=None,
-        linked_order_id=None
+        limit_price: Decimal = None,
+        stop_price: Decimal = None,
+        trail_price: Decimal = None,
+        custom_tag: str = None,
+        linked_order_id: int = None
     ):
         url = f"{self.base_url}/api/Order/place"
         headers = {
@@ -68,19 +69,29 @@ class OrderAPI:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.token}"
         }
-        payload = {
+        
+        # Build the request data, converting Decimal to string for JSON serialization
+        data = {
             "accountId": account_id,
             "contractId": contract_id,
             "type": type,
             "side": side,
-            "size": size,
-            "limitPrice": limit_price,
-            "stopPrice": stop_price,
-            "trailPrice": trail_price,
-            "customTag": custom_tag,
-            "linkedOrderId": linked_order_id
+            "size": size
         }
-        response = requests.post(url, json=payload, headers=headers)
+        
+        # Only add the optional parameters if they are not None
+        if limit_price is not None:
+            data["limitPrice"] = str(limit_price)
+        if stop_price is not None:
+            data["stopPrice"] = str(stop_price)
+        if trail_price is not None:
+            data["trailPrice"] = str(trail_price)
+        if custom_tag is not None:
+            data["customTag"] = custom_tag
+        if linked_order_id is not None:
+            data["linkedOrderId"] = linked_order_id
+            
+        response = requests.post(url, json=data, headers=headers)
         if response.status_code == 200:
             data = response.json()
             if data.get("success") and data.get("errorCode") == 0:
@@ -118,7 +129,8 @@ class OrderAPI:
         size=None,
         limit_price=None,
         stop_price=None,
-        trail_price=None
+        trail_price=None,
+        linked_order_id: int = None
     ):
         url = f"{self.base_url}/api/Order/modify"
         headers = {
@@ -126,14 +138,24 @@ class OrderAPI:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.token}"
         }
+        
+        # Build the payload with only provided parameters
         payload = {
             "accountId": account_id,
-            "orderId": order_id,
-            "size": size,
-            "limitPrice": limit_price,
-            "stopPrice": stop_price,
-            "trailPrice": trail_price
+            "orderId": order_id
         }
+        
+        # Add optional parameters if they are not None
+        if size is not None:
+            payload["size"] = size
+        if limit_price is not None:
+            payload["limitPrice"] = str(limit_price) if isinstance(limit_price, Decimal) else limit_price
+        if stop_price is not None:
+            payload["stopPrice"] = str(stop_price) if isinstance(stop_price, Decimal) else stop_price
+        if trail_price is not None:
+            payload["trailPrice"] = str(trail_price) if isinstance(trail_price, Decimal) else trail_price
+        if linked_order_id is not None:
+            payload["linkedOrderId"] = linked_order_id
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code == 200:
             data = response.json()

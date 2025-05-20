@@ -6,6 +6,7 @@ from .position import PositionAPI
 from .trade import TradeAPI
 from .history import HistoryAPI
 from .realtime import RealTimeClient
+from .market_data import MarketDataClient
 
 
 class TopstepClient:
@@ -19,5 +20,7 @@ class TopstepClient:
         self.contract = ContractAPI(self.token, self.base_url)
         self.order = OrderAPI(self.token, self.base_url)
         self.position = PositionAPI(self.token, self.base_url)
+        self.realtime = RealTimeClient(self.token, self.base_url)
+        self.market_data = MarketDataClient(self.token, self.base_url)
         self.trade = TradeAPI(self.token, self.base_url)
         self.history = HistoryAPI(self.token, self.base_url)

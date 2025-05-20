@@ -3,14 +3,19 @@ import time
 import logging
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional, List
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import sys 
 
 from topstepapi import TopstepClient
 from topstepapi.load_env import load_environment
 from topstepapi.order import OrderAPI
+from topstepapi.market_data import MarketDataClient
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from strategies.volume_profile import VolumeProfileBreakout
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,29 +28,6 @@ SMTP_PORT = 587
 EMAIL_USER = "dawsonbremner4400@gmail.com"
 EMAIL_PASSWORD = "hqqu suys gbdi otnr"
 TO_EMAIL = "dawsonbremner0@gmail.com"
-
-class MicroScalper:
-    def __init__(self, bot):
-        self.bot = bot
-        self.last_prices = []
-        self.window_size = 5
-        self.threshold = 1.0
-
-    def on_trade(self, price: Decimal):
-        self.last_prices.append(price)
-        if len(self.last_prices) > self.window_size:
-            self.last_prices.pop(0)
-            self.check_signal()
-
-    def check_signal(self):
-        if self.bot.current_position != 0:
-            return
-
-        delta = self.last_prices[-1] - self.last_prices[0]
-        if delta > self.threshold:
-            self.bot.place_trade("sell", self.last_prices[-1])
-        elif delta < -self.threshold:
-            self.bot.place_trade("buy", self.last_prices[-1])
 
 class TradingBot:
     def __init__(self):
@@ -67,7 +49,7 @@ class TradingBot:
         self.entry_price: Optional[Decimal] = None
         self.realized_pnl: Decimal = Decimal("0.0")
 
-        self.scalper = MicroScalper(self)
+        self.strategy = VolumeProfileBreakout(self)
 
     def setup(self):
         accounts = self.client.account.search_accounts(only_active=True)
@@ -86,7 +68,6 @@ class TradingBot:
     def run(self):
         self.setup()
 
-        from topstepapi.market_data import MarketDataClient
         self.market_data = MarketDataClient(
             token=os.getenv("TOPSTEPX_SESSION_TOKEN"),
             contract_id=self.contract_id,
@@ -114,7 +95,7 @@ class TradingBot:
         self.latest_trade_price = price
 
         logger.info(f"Latest market price: {price}")
-        self.scalper.on_trade(price)
+        self.strategy.on_trade(price)
 
     def place_trade(self, side: str, entry_price: Decimal):
         side_num = 0 if side == "buy" else 1
