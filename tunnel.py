@@ -36,13 +36,21 @@ def webhook():
         print(f"Headers: {dict(request.headers)}")
         
         # Try to parse as JSON first
+        action = ''
+        symbol = ''
+        price = 0.0
+        quantity = 1.0
+        tp = 0.0
+        sl = 0.0
+        
         if request.is_json:
             data = request.get_json()
-            print(f"JSON Data: {data}")
             action = data.get('action', '').upper()
             symbol = data.get('symbol', '')
             price = float(data.get('price', 0))
             quantity = float(data.get('quantity', 1))
+            tp = float(data.get('tp', 0))
+            sl = float(data.get('sl', 0))
         else:
             # Fall back to form data
             data = request.get_data(as_text=True)
@@ -55,7 +63,10 @@ def webhook():
             
             action = params.get('action', '').upper()
             symbol = params.get('symbol', '')
-            price = float(params.get('price', '0'))
+            price = float(params.get('price', 0))
+            quantity = float(params.get('quantity', 1))
+            tp = float(params.get('tp', 0))
+            sl = float(params.get('sl', 0))
             quantity = float(params.get('quantity', '1'))
         
         print(f"TradingView Webhook: {action} {quantity} {symbol} @ {price}")
@@ -66,7 +77,9 @@ def webhook():
             'action': action,
             'symbol': symbol,
             'price': price,
-            'quantity': quantity
+            'quantity': quantity,
+            'tp': tp,
+            'sl': sl
         }
         trades.append(trade)
         
