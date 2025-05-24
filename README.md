@@ -1,27 +1,103 @@
-# TopstepAPI Python Wrapper
+# TopstepAPI TradingView Webhook Integration
 
-A Python package for interacting with the TopstepX API, including authentication, account management, order placement, position management, trade history, contract search, historical bars, and real-time streaming via SignalR.
+A Python webhook server that receives trading signals from TradingView and forwards them to your TopstepX account. Includes real-time market data streaming via SignalR.
+
+## Features
+
+- Receive trading signals from TradingView via webhooks
+- Forward orders to TopstepX API
+- Real-time market data streaming
+- Secure ngrok tunnel for local development
+- Trade logging and history
+
+## Prerequisites
+
+- Python 3.8+
+- ngrok account (free)
+- TradingView account with Pro or higher plan
 
 ---
 
-## Installation
+## 🚀 Quick Start
 
-Install from your local directory (editable mode recommended for development):
-
-```bash
-pip install -e .
-```
-
-Or standard install:
+### 1. Install Dependencies
 
 ```bash
-pip install .
+pip install -r requirements.txt
 ```
 
-**Dependencies:**
+### 2. Set Up ngrok
 
-- `requests`
-- `signalrcore` (for real-time streaming)
+1. Sign up at [ngrok](https://ngrok.com/)
+2. Install ngrok and authenticate:
+   ```bash
+   npm install -g ngrok
+   ngrok config add-authtoken YOUR_AUTH_TOKEN
+   ```
+3. Reserve your subdomain:
+   ```bash
+   ngrok http --domain=proud-sunfish-sharply.ngrok-free.app 5000
+   ```
+
+### 3. Configure TradingView
+
+1. In TradingView, create a new alert
+2. Set condition to "Once Per Bar Close"
+3. Webhook URL: `https://proud-sunfish-sharply.ngrok-free.app/webhook`
+4. Message (Pine Script variables):
+   ```
+   action={{strategy.order.action}}&symbol={{ticker}}&price={{strategy.order.price}}&quantity={{strategy.order.contracts}}
+   ```
+5. Click "Create"
+
+### 4. Start the Server
+
+In two separate terminals:
+
+```bash
+# Terminal 1 - Start the webhook server
+python tunnel.py
+
+# Terminal 2 - Start ngrok tunnel (if not already running)
+ngrok http --domain=proud-sunfish-sharply.ngrok-free.app 5000
+```
+
+### 5. Test Your Setup
+
+Send a test alert from TradingView or use curl:
+
+```bash
+curl -X POST https://proud-sunfish-sharply.ngrok-free.app/webhook \
+  -d "action=BUY&symbol=BTCUSD&price=50000&quantity=0.01"
+```
+
+## 📝 Configuration
+
+Edit `.env` file with your credentials:
+
+```
+TOPSTEPX_USERNAME=your_username
+TOPSTEPX_API_KEY=your_api_key
+```
+
+## 📊 Monitoring
+
+- View trades in `trades.json`
+- Check server logs in the terminal
+- Monitor ngrok traffic at https://dashboard.ngrok.com/
+
+## 🔒 Security
+
+- Uses ngrok's built-in HTTPS
+- No need to expose your public IP
+- All traffic is encrypted
+
+## 📚 Dependencies
+
+- Flask
+- python-dotenv
+- requests
+- signalrcore
 
 ---
 
