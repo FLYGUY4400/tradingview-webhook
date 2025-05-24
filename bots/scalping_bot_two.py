@@ -12,6 +12,10 @@ from topstepapi import TopstepClient
 from topstepapi.load_env import load_environment
 from topstepapi.order import OrderAPI
 
+import joblib
+import numpy as np
+import pandas as pd
+
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -24,17 +28,32 @@ EMAIL_USER = "dawsonbremner4400@gmail.com"
 EMAIL_PASSWORD = "hqqu suys gbdi otnr"
 TO_EMAIL = "dawsonbremner0@gmail.com"
 
+def round_to_tick(price, tick_size=Decimal('0.25')):
+    if not isinstance(price, Decimal):
+        price = Decimal(str(price))
+    if not isinstance(tick_size, Decimal):
+        tick_size = Decimal(str(tick_size))
+    return (price / tick_size).to_integral_value(rounding='ROUND_HALF_UP') * tick_size
+
 class MicroScalper:
     def __init__(self, bot):
         self.bot = bot
         self.last_prices = []
+        self.last_volumes = []
         self.window_size = 5
         self.threshold = 1.0
+        self.last_timestamp = None
 
-    def on_trade(self, price: Decimal):
+    def on_trade(self, price: Decimal, volume: Optional[int] = None, timestamp: Optional[str] = None):
         self.last_prices.append(price)
+        self.last_volumes.append(volume if volume is not None else 1)  # Default to 1 if no volume
+        if timestamp:
+            self.last_timestamp = timestamp
+            
         if len(self.last_prices) > self.window_size:
             self.last_prices.pop(0)
+            if self.last_volumes:  # Only pop if we have volumes
+                self.last_volumes.pop(0)
             self.check_signal()
 
     def check_signal(self):
@@ -74,12 +93,54 @@ class TradingBot:
 
         self.scalper = MicroScalper(self)
 
+        self.bot = joblib.load("../ml/model/trained_models/trade_param_model.joblib")
+
+    def fetch_historical_volumes(self, lookback_minutes: int = 5):
+        """Fetch historical bars with volume data"""
+        try:
+            end_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+            start_time = (datetime.utcnow() - timedelta(minutes=lookback_minutes)).strftime('%Y-%m-%dT%H:%M:%S')
+            
+            bars = self.client.history.retrieve_bars(
+                contract_id=self.contract_id,
+                live=True,
+                start_time=start_time,
+                end_time=end_time,
+                unit=1,  # 1 minute bars
+                unit_number=1,
+                limit=lookback_minutes,
+                include_partial_bar=True
+            )
+            
+            if bars:
+                # Sort by timestamp in case they're out of order
+                bars.sort(key=lambda x: x['t'])
+                # Update volumes in scalper
+                for bar in bars:
+                    if 'v' in bar and bar['v'] > 0:  # Only update if we have volume data
+                        self.scalper.on_trade(
+                            price=Decimal(str(bar['c'])),
+                            volume=bar['v'],
+                            timestamp=bar['t']
+                        )
+                logger.info(f"Fetched {len(bars)} historical bars with volume data")
+                return True
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error fetching historical volumes: {e}")
+            return False
+
     def setup(self):
         accounts = self.client.account.search_accounts(only_active=True)
         if not accounts:
             raise ValueError("No active trading accounts found")
         self.account_id = accounts[0]["id"]
         logger.info(f"Using account ID: {self.account_id}")
+
+        # Fetch historical volume data
+        if not self.fetch_historical_volumes(lookback_minutes=15):
+            logger.warning("Could not fetch historical volume data, using default values")
 
         positions = self.client.position.search_open_positions(self.account_id)
         for pos in positions:
@@ -88,6 +149,41 @@ class TradingBot:
                 self.entry_price = Decimal(str(pos["averageOpenPrice"]))
                 logger.info(f"Found open position of size {self.current_position} at {self.entry_price}")
 
+    def get_feature_columns(self):
+        """Return the expected feature columns in the correct order"""
+        return [
+            'price_mean', 'price_std', 'price_min', 'price_max',
+            'price_range', 'price_slope', 'mean_volume', 'sum_volume', 'volume_std'
+        ]
+        
+    def extract_features(self) -> Optional[dict]:
+        if len(self.scalper.last_prices) < self.scalper.window_size:
+            return None
+
+        prices = np.array(self.scalper.last_prices)
+        volumes = np.array(self.scalper.last_volumes if hasattr(self.scalper, 'last_volumes') and len(self.scalper.last_volumes) > 0 else np.ones_like(prices))
+        
+        # Ensure we have enough data
+        if len(volumes) < 2:
+            volumes = np.ones_like(prices)
+        
+        # Calculate features in the same order as feature_columns
+        features = {
+            'price_mean': float(prices.mean()),
+            'price_std': float(prices.std() if len(prices) > 1 else 0.0),
+            'price_min': float(prices.min()),
+            'price_max': float(prices.max()),
+            'price_range': float(prices.ptp() if len(prices) > 1 else 0.0),
+            'price_slope': float((prices[-1] - prices[0]) / len(prices)) if len(prices) > 1 else 0.0,
+            'mean_volume': float(volumes.mean() if len(volumes) > 0 else 0.0),
+            'sum_volume': float(volumes.sum() if len(volumes) > 0 else 0.0),
+            'volume_std': float(volumes.std() if len(volumes) > 1 else 0.0)
+        }
+        
+        # Ensure all expected features are present and in the right order
+        return {col: features[col] for col in self.get_feature_columns()}
+    
+    
     def run(self):
         self.setup()
 
@@ -116,16 +212,26 @@ class TradingBot:
             self.market_data.stop()
 
     def _handle_market_trade(self, args: List):
-        contract_id, trade_data_list = args
-        if not trade_data_list or contract_id != self.contract_id:
-            return
+        """Handle incoming market trade data"""
+        try:
+            contract_id, trades = args
+            if contract_id != self.contract_id or not trades:
+                return
 
-        last_trade = trade_data_list[-1]
-        price = Decimal(str(last_trade['price']))
-        self.latest_trade_price = price
-
-        logger.info(f"Latest market price: {price}")
-        self.scalper.on_trade(price)
+            latest_trade = trades[-1]
+            price = Decimal(str(latest_trade['price']))
+            volume = latest_trade.get('size', 1)  # Default to 1 if size not available
+            timestamp = latest_trade.get('time')
+            self.latest_trade_price = price
+            
+            # Update scalper with latest price and volume
+            self.scalper.on_trade(price=price, volume=volume, timestamp=timestamp)
+            
+            # Check if we should place a trade
+            self.check_trade_conditions(price)
+            
+        except Exception as e:
+            logger.error(f"Error in _handle_market_trade: {e}")
 
     def check_and_cancel_orders(self):
         """Check if either TP or SL was hit and cancel the other order."""
@@ -172,13 +278,52 @@ class TradingBot:
             except Exception as e:
                 logger.error(f"Error checking order status: {e}")
 
+
     def place_trade(self, side: str, entry_price: Decimal):
-        side_num = 0 if side == "buy" else 1
-        
-        # First, cancel any existing orders
-        self.cancel_all_orders()
-        
+        features_dict = self.extract_features()
+        if features_dict is None:
+            logger.warning("Not enough data to place trade")
+            return
+
         try:
+            # Get feature columns in the correct order
+            feature_columns = self.get_feature_columns()
+            
+            # Create a DataFrame with features in the expected order
+            features_list = [[features_dict[col] for col in feature_columns]]
+            
+            # Convert to numpy array for prediction
+            features_array = np.array(features_list, dtype=np.float32)
+            
+            # Make prediction using numpy array to avoid feature name issues
+            predictions = self.bot.predict(features_array)
+            
+            if len(predictions) == 0:
+                logger.warning("No predictions returned from model")
+                return
+                
+            predicted = predictions[0]
+            if len(predicted) < 3:
+                logger.warning(f"Unexpected prediction format: {predicted}")
+                return
+                
+            # Extract values safely
+            predicted_tp = float(predicted[0])
+            predicted_sl = float(predicted[1])
+            lot_size = max(1, int(round(predicted[2])))  # Ensure at least 1 lot
+
+            # Store predictions
+            self.tp_points = Decimal(str(predicted_tp))
+            self.sl_points = Decimal(str(predicted_sl))
+            self.position_size = lot_size
+
+            logger.info(f"Predicted TP: {self.tp_points}, SL: {self.sl_points}, Lot Size: {lot_size}")
+            
+            side_num = 0 if side == "buy" else 1
+            
+            # First, cancel any existing orders
+            self.cancel_all_orders()
+            
             # Place the main market order
             self.main_order_id = self.order_api.place_order(
                 account_id=self.account_id,
@@ -195,13 +340,13 @@ class TradingBot:
             # For SELL orders (1): TP is BUY LIMIT, SL is BUY STOP
             tp_sl_side = 1 if side_num == 0 else 0  # Opposite side of the main order
 
-            # Calculate TP/SL prices based on order direction
+            # Calculate TP/SL prices based on order direction and round to tick size
             if side_num == 0:  # BUY
-                tp_price = entry_price + self.tp_points
-                sl_price = entry_price - self.sl_points
+                tp_price = round_to_tick(entry_price + self.tp_points)
+                sl_price = round_to_tick(entry_price - self.sl_points)
             else:  # SELL
-                tp_price = entry_price - self.tp_points
-                sl_price = entry_price + self.sl_points
+                tp_price = round_to_tick(entry_price - self.tp_points)
+                sl_price = round_to_tick(entry_price + self.sl_points)
 
             # Place Take Profit order (LIMIT)
             self.active_tp_order_id = self.order_api.place_order(
@@ -226,8 +371,8 @@ class TradingBot:
             )
 
             logger.info(f"Main Order Placed: {self.main_order_id}")
-            logger.info(f"TP Order Placed: {self.active_tp_order_id} at {tp_price}")
-            logger.info(f"SL Order Placed: {self.active_sl_order_id} at {sl_price}")
+            logger.info(f"TP Order Placed: {self.active_tp_order_id} at {tp_price} (points: {self.tp_points})")
+            logger.info(f"SL Order Placed: {self.active_sl_order_id} at {sl_price} (points: {self.sl_points})")
             
             # Update position state
             self.current_position = self.position_size if side == "buy" else -self.position_size
