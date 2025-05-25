@@ -121,7 +121,7 @@ class TVBot:
                     continue
                 
                 # Validate required fields
-                required_fields = ['action', 'price', 'symbol']
+                required_fields = ['action', 'price', 'symbol', 'qty', 'tp', 'sl']
                 if not all(field in trade for field in required_fields):
                     logger.error(f"Invalid trade format, missing required fields: {trade}")
                     continue
@@ -137,7 +137,10 @@ class TVBot:
                 self.place_trade(
                     side=trade['action'],
                     price=Decimal(str(trade['price'])),
-                    symbol=trade['symbol']
+                    symbol=trade['symbol'],
+                    qty=trade['qty'],
+                    tp=trade['tp'],
+                    sl=trade['sl']
                 )
                 
                 # Mark as processed
@@ -159,7 +162,7 @@ class TVBot:
         self.account_id = accounts[0]["id"]
         logger.info(f"Initialized with account ID: {self.account_id}")
 
-    def place_trade(self, side: str, price: Decimal, symbol: Optional[str] = None) -> Dict:
+    def place_trade(self, side: str, price: Decimal, symbol: Optional[str] = None, qty: Optional[int] = None, tp: Optional[Decimal] = None, sl: Optional[Decimal] = None) -> Dict:
         """
         Place a new trade with TP/SL orders
         
@@ -183,26 +186,25 @@ class TVBot:
         # Final check for active trades (defensive programming)
         if self.has_active_trades():
             raise ValueError("Cannot place new trade: Another trade is already active")
-            
+        
+        # Convert to Decimal if they're not already
+        tp_price = Decimal(str(tp)) if tp is not None else None
+        sl_price = Decimal(str(sl)) if sl is not None else None 
         # Calculate TP/SL prices
         if side == "BUY":
-            tp_price = price * (1 + self.tp_percent)
-            sl_price = price * (1 - self.sl_percent)
             tp_side = "SELL"
             sl_side = "SELL"
         else:  # SELL
-            tp_price = price * (1 - self.tp_percent)
-            sl_price = price * (1 + self.sl_percent)
             tp_side = "BUY"
             sl_side = "BUY"
-        
+
         # Place entry order (Market order)
         entry_order_id = self.order_api.place_order(
             account_id=self.account_id,
             contract_id=symbol,
             type=2,  # Market order
             side=0 if side == "BUY" else 1,  # 0=Buy, 1=Sell
-            size=self.position_size
+            size=qty or self.position_size
         )
         
         # Place TP order (Limit order)
@@ -210,8 +212,8 @@ class TVBot:
             account_id=self.account_id,
             contract_id=symbol,
             type=1,  # Limit order
-            side=1 if tp_side == "BUY" else 0,
-            size=self.position_size,
+            side=0 if tp_side == "BUY" else 1,
+            size=qty or self.position_size,
             linked_order_id=entry_order_id,
             limit_price=tp_price
         )
@@ -221,8 +223,8 @@ class TVBot:
             account_id=self.account_id,
             contract_id=symbol,
             type=4,  # Stop order
-            side=1 if sl_side == "BUY" else 0,
-            size=self.position_size,
+            side=0 if sl_side == "BUY" else 1,
+            size=qty or self.position_size,
             linked_order_id=entry_order_id,
             stop_price=sl_price
         )
