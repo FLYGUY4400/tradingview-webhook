@@ -106,8 +106,15 @@ class TVBot:
         
         for trade in trades:
             try:
+                # Handle both old and new trade formats
+                timestamp = trade.get('timestamp', trade.get('time', str(datetime.now().timestamp())))
+                action = trade.get('action', '').upper()
+                symbol = trade.get('symbol', '')
+                price = trade.get('price', 0)
+                quantity = float(trade.get('qty', trade.get('quantity', 1)))
+                
                 # Create a unique ID for the trade
-                trade_id = f"{trade.get('symbol')}_{trade.get('action')}_{trade.get('price')}_{trade.get('timestamp')}"
+                trade_id = f"{symbol}_{action}_{price}_{timestamp}"
                 
                 # Skip if already processed
                 if trade_id in self.processed_trades:

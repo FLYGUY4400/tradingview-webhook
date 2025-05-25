@@ -35,39 +35,59 @@ def webhook():
         print(f"Content-Type: {request.content_type}")
         print(f"Headers: {dict(request.headers)}")
         
-        # Try to parse as JSON first
+        # Initialize variables with default values
         action = ''
         symbol = ''
         price = 0.0
-        quantity = 1.0
+        quantity = 1.0  # Default quantity if not provided
         tp = 0.0
         sl = 0.0
+        timestamp = None
         
         if request.is_json:
             data = request.get_json()
-            action = data.get('action', '').upper()
-            symbol = data.get('symbol', '')
-            price = float(data.get('price', 0))
-            quantity = float(data.get('quantity', 1))
-            tp = float(data.get('tp', 0))
-            sl = float(data.get('sl', 0))
+            # Handle new format with timestamp and qty
+            if 'time' in data:
+                action = str(data.get('action', '')).upper()
+                symbol = str(data.get('symbol', ''))
+                price = float(data.get('price', 0))
+                quantity = float(data.get('qty', 1))  # Using qty instead of quantity
+                tp = float(data.get('tp', 0))
+                sl = float(data.get('sl', 0))
+                timestamp = data.get('time')
+            else:
+                # Handle old format for backward compatibility
+                action = str(data.get('action', '')).upper()
+                symbol = str(data.get('symbol', ''))
+                price = float(data.get('price', 0))
+                quantity = float(data.get('quantity', 1))
+                tp = float(data.get('tp', 0))
+                sl = float(data.get('sl', 0))
         else:
-            # Fall back to form data
-            data = request.get_data(as_text=True)
-            print(f"Form Data: {data}")
+            # Handle raw form data (action=buy&symbol=...)
+            raw_data = request.get_data(as_text=True)
+            print(f"Raw form data: {raw_data}")
+            
+            # Parse the form data
             params = {}
-            for pair in data.split('&'):
+            for pair in raw_data.split('&'):
                 if '=' in pair:
                     key, value = pair.split('=', 1)
                     params[key] = value
             
-            action = params.get('action', '').upper()
-            symbol = params.get('symbol', '')
-            price = float(params.get('price', 0))
-            quantity = float(params.get('quantity', 1))
-            tp = float(params.get('tp', 0))
-            sl = float(params.get('sl', 0))
-            quantity = float(params.get('quantity', '1'))
+            action = str(params.get('action', '')).upper()
+            symbol = str(params.get('symbol', ''))
+            try:
+                price = float(params.get('price', 0))
+                quantity = float(params.get('qty', 1))  # Using qty as per new format
+                tp = float(params.get('tp', 0))
+                sl = float(params.get('sl', 0))
+            except (ValueError, TypeError) as e:
+                print(f"Error parsing numeric values: {e}")
+                price = 0.0
+                quantity = 1.0
+                tp = 0.0
+                sl = 0.0
         
         print(f"TradingView Webhook: {action} {quantity} {symbol} @ {price}")
         
