@@ -1,0 +1,164 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © dawsonbremner4400
+
+//@version=6
+strategy("Micro Scalp - Topstep Combine", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=2, max_bars_back=500)
+
+// === INPUTS ===
+// Timeframe and Session
+use_session = input.bool(true, "Use Trading Session", group="Session")
+session_time = input.session("0930-1600", "Trading Session", group="Session")
+in_session = not use_session or not na(time(timeframe.period, session_time))
+
+// EMA Settings
+ema_fast = input.int(8, "Fast EMA", minval=1, group="EMA")
+ema_slow = input.int(21, "Slow EMA", minval=1, group="EMA")
+
+// VWAP Settings
+use_vwap = input.bool(true, "Use VWAP Filter", group="VWAP")
+vwap_bands = input.bool(true, "Show VWAP Bands", group="VWAP")
+vwap_mult = input.float(0.5, "VWAP Band Multiplier", step=0.1, group="VWAP")
+
+// RSI Settings
+rsi_length = input.int(14, "RSI Length", group="RSI")
+rsi_ob = input.int(70, "RSI Overbought", group="RSI")
+rsi_os = input.int(30, "RSI Oversold", group="RSI")
+
+// Risk Management
+risk_reward = input.float(1.5, "Risk:Reward Ratio", step=0.1, group="Risk")
+atr_length = input.int(14, "ATR Length", group="Risk")
+atr_mult_sl = input.float(1.0, "ATR Multiplier for SL", step=0.1, group="Risk")
+max_trades_per_day = input.int(10, "Max Trades Per Day", group="Risk")
+
+// Position Sizing
+account_size = input.float(50000, "Account Size ($)", step=1000, group="Position Sizing")
+risk_per_trade = input.float(0.5, "Risk Per Trade (%)", step=0.1, group="Position Sizing")
+min_contracts = input.int(1, "Minimum Contracts", minval=1, group="Position Sizing")
+max_contracts = input.int(8, "Maximum Contracts", minval=1, group="Position Sizing")
+mnq_point_value = input.float(2.0, "MNQ Point Value ($)", group="Position Sizing")
+
+// === CALCULATIONS ===
+// EMAs
+ema_f = ta.ema(close, ema_fast)
+ema_s = ta.ema(close, ema_slow)
+
+// VWAP
+vwap_val = ta.vwap(hlc3)
+vwap_std = ta.stdev(hlc3, 20)
+vwap_upper = vwap_val + (vwap_std * vwap_mult)
+vwap_lower = vwap_val - (vwap_std * vwap_mult)
+
+// RSI
+rsi = ta.rsi(close, rsi_length)
+
+// ATR for dynamic stops
+atr = ta.atr(atr_length)
+
+// Price action filters
+body_size = math.abs(close - open)
+wick_top = high - math.max(open, close)
+wick_bottom = math.min(open, close) - low
+avg_body = ta.sma(body_size, 10)
+
+// Volume filter
+vol_avg = ta.sma(volume, 20)
+vol_spike = volume > vol_avg * 1.2
+
+// === ENTRY CONDITIONS ===
+// Trend conditions
+bullish_trend = ema_f > ema_s and close > ema_f
+bearish_trend = ema_f < ema_s and close < ema_f
+
+// VWAP conditions
+above_vwap = close > vwap_val
+below_vwap = close < vwap_val
+near_vwap = math.abs(close - vwap_val) < atr * 0.5
+
+// Momentum conditions
+bullish_momentum = rsi > 50 and rsi < rsi_ob
+bearish_momentum = rsi < 50 and rsi > rsi_os
+
+// Price action conditions
+strong_bull_candle = close > open and body_size > avg_body * 0.7 and wick_bottom < body_size * 0.3
+strong_bear_candle = close < open and body_size > avg_body * 0.7 and wick_top < body_size * 0.3
+
+// Pullback conditions (key for micro scalping)
+pullback_bull = bullish_trend and close < ema_f[1] and close > ema_f
+pullback_bear = bearish_trend and close > ema_f[1] and close < ema_f
+
+// Support/Resistance bounces
+support_bounce = low <= vwap_lower and close > vwap_lower
+resistance_reject = high >= vwap_upper and close < vwap_upper
+
+// === COMBINED ENTRY SIGNALS ===
+long_signal = in_session and strategy.position_size == 0 and (
+     (pullback_bull and bullish_momentum and vol_spike) or
+     (support_bounce and bullish_trend and rsi < 60) or
+     (strong_bull_candle and above_vwap and bullish_momentum)
+     )
+
+short_signal = in_session and strategy.position_size == 0 and (
+     (pullback_bear and bearish_momentum and vol_spike) or
+     (resistance_reject and bearish_trend and rsi > 40) or
+     (strong_bear_candle and below_vwap and bearish_momentum)
+     )
+
+// === TRADE MANAGEMENT ===
+// Count daily trades
+var int daily_trades = 0
+new_day = ta.change(dayofweek) != 0
+if new_day
+    daily_trades := 0
+
+// Dynamic Position Sizing
+max_risk_dollars = account_size * (risk_per_trade / 100)
+stop_loss_points = atr * atr_mult_sl
+stop_loss_dollars = stop_loss_points * mnq_point_value
+contracts_needed = math.floor(max_risk_dollars / stop_loss_dollars)
+position_contracts = math.max(min_contracts, math.min(max_contracts, contracts_needed))
+
+// === STRATEGY EXECUTION ===
+if long_signal and daily_trades < max_trades_per_day
+    stop_price = close - (atr * atr_mult_sl)
+    take_profit = close + (atr * atr_mult_sl * risk_reward)
+    
+    strategy.entry("Long", strategy.long, qty=position_contracts)
+    strategy.exit("Long Exit", "Long", stop=stop_price, limit=take_profit)
+    daily_trades := daily_trades + 1
+    
+    // Alert for your bot
+    alert('{"time":"' + str.tostring(time) + '","action":"buy","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(stop_price) + ',"tp":' + str.tostring(take_profit) + ',"qty":' + str.tostring(position_contracts) + '}', alert.freq_once_per_bar)
+
+if short_signal and daily_trades < max_trades_per_day
+    stop_price = close + (atr * atr_mult_sl)
+    take_profit = close - (atr * atr_mult_sl * risk_reward)
+    
+    strategy.entry("Short", strategy.short, qty=position_contracts)
+    strategy.exit("Short Exit", "Short", stop=stop_price, limit=take_profit)
+    daily_trades := daily_trades + 1
+    
+    // Alert for your bot
+    alert('{"time":"' + str.tostring(time) + '","action":"sell","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(stop_price) + ',"tp":' + str.tostring(take_profit) + ',"qty":' + str.tostring(position_contracts) + '}', alert.freq_once_per_bar)
+
+// === PLOTTING ===
+plot(ema_f, "Fast EMA", color=color.blue, linewidth=2)
+plot(ema_s, "Slow EMA", color=color.red, linewidth=2)
+plot(use_vwap ? vwap_val : na, "VWAP", color=color.yellow, linewidth=2)
+plot(vwap_bands ? vwap_upper : na, "VWAP Upper", color=color.gray, style=plot.style_line)
+plot(vwap_bands ? vwap_lower : na, "VWAP Lower", color=color.gray, style=plot.style_line)
+
+// Background coloring for trade signals
+bgcolor(long_signal ? color.new(color.green, 90) : na)
+bgcolor(short_signal ? color.new(color.red, 90) : na)
+
+// Plot trade count and position info
+var table trade_table = table.new(position.top_right, 2, 4, bgcolor=color.white, border_width=1)
+if barstate.islast
+    table.cell(trade_table, 0, 0, "Daily Trades", text_color=color.black)
+    table.cell(trade_table, 1, 0, str.tostring(daily_trades), text_color=color.black)
+    table.cell(trade_table, 0, 1, "Max Trades", text_color=color.black)
+    table.cell(trade_table, 1, 1, str.tostring(max_trades_per_day), text_color=color.black)
+    table.cell(trade_table, 0, 2, "Position Size", text_color=color.black)
+    table.cell(trade_table, 1, 2, str.tostring(position_contracts) + " contracts", text_color=color.black)
+    table.cell(trade_table, 0, 3, "Risk $", text_color=color.black)
+    table.cell(trade_table, 1, 3, "$" + str.tostring(math.round(stop_loss_dollars * position_contracts, 2)), text_color=color.black)
