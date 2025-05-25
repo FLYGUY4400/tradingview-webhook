@@ -1,0 +1,205 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © dawsonbremner4400
+
+//@version=6
+strategy("Volume Profile S/R - Topstep Combine", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=2, max_bars_back=500)
+
+// === INPUTS ===
+// Trading Session
+use_session = input.bool(true, "Use Trading Session", group="Session")
+session_time = input.session("0930-1600", "Trading Session", group="Session")
+in_session = not use_session or not na(time(timeframe.period, session_time))
+
+// Volume Profile Settings
+vp_rows = input.int(24, "Volume Profile Rows", minval=10, maxval=100, group="Volume Profile")
+proximity_threshold = input.float(0.1, "Proximity to Level (%)", step=0.01, group="Volume Profile")
+
+// Confirmation Filters
+use_rsi = input.bool(true, "Use RSI Filter", group="Filters")
+rsi_length = input.int(14, "RSI Length", group="Filters")
+rsi_ob = input.int(70, "RSI Overbought", group="Filters")
+rsi_os = input.int(30, "RSI Oversold", group="Filters")
+
+use_volume = input.bool(true, "Use Volume Filter", group="Filters")
+vol_mult = input.float(1.2, "Volume Multiplier", step=0.1, group="Filters")
+
+// Risk Management
+risk_reward = input.float(2.0, "Risk:Reward Ratio", step=0.1, group="Risk")
+atr_length = input.int(14, "ATR Length", group="Risk")
+atr_mult_sl = input.float(0.8, "ATR Multiplier for SL", step=0.1, group="Risk")
+max_trades_per_day = input.int(8, "Max Trades Per Day", group="Risk")
+
+// Position Sizing
+account_size = input.float(50000, "Account Size ($)", step=1000, group="Position Sizing")
+risk_per_trade = input.float(0.4, "Risk Per Trade (%)", step=0.1, group="Position Sizing")
+min_contracts = input.int(1, "Minimum Contracts", minval=1, group="Position Sizing")
+max_contracts = input.int(8, "Maximum Contracts", minval=1, group="Position Sizing")
+mnq_point_value = input.float(2.0, "MNQ Point Value ($)", group="Position Sizing")
+
+// === VOLUME PROFILE CALCULATIONS ===
+// Function to calculate volume profile levels
+f_get_vp_levels(start_time, end_time) =>
+    var float poc = na
+    var float vah = na
+    var float val = na
+    
+    if time >= start_time and time <= end_time
+        // Simplified volume profile calculation
+        high_vol = high * volume
+        low_vol = low * volume
+        hlc3_vol = hlc3 * volume
+        
+        // Track highest volume price (POC approximation)
+        if na(poc) or volume > volume[1]
+            poc := hlc3
+        
+        // Volume area high/low approximation
+        if na(vah) or high_vol > high_vol[1]
+            vah := high
+        if na(val) or low_vol > low_vol[1]
+            val := low
+    
+    [poc, vah, val]
+
+// Get previous week levels
+week_start = timestamp(year, month, dayofmonth - dayofweek + 1, 0, 0, 0) - 7 * 24 * 60 * 60 * 1000
+week_end = week_start + 7 * 24 * 60 * 60 * 1000 - 1
+
+// Get previous day levels  
+day_start = timestamp(year, month, dayofmonth, 0, 0, 0) - 24 * 60 * 60 * 1000
+day_end = day_start + 24 * 60 * 60 * 1000 - 1
+
+// Calculate levels (simplified approach using price action)
+var float prev_week_poc = na
+var float prev_week_vah = na  
+var float prev_week_val = na
+var float prev_day_poc = na
+var float prev_day_vah = na
+var float prev_day_val = na
+
+// Update levels at start of new periods
+if ta.change(dayofweek) == 1 // New week
+    prev_week_poc := ta.highest(volume, 5) == volume ? hlc3 : prev_week_poc[1]
+    prev_week_vah := ta.highest(high, 7)
+    prev_week_val := ta.lowest(low, 7)
+
+if ta.change(dayofmonth) != 0 or (hour == 0 and minute == 0) // New day
+    prev_day_poc := ta.highest(volume, 1) == volume ? hlc3[1] : prev_day_poc[1]  
+    prev_day_vah := high[1]
+    prev_day_val := low[1]
+
+// Carry forward levels
+prev_week_poc := na(prev_week_poc) ? hlc3 : prev_week_poc
+prev_week_vah := na(prev_week_vah) ? high : prev_week_vah
+prev_week_val := na(prev_week_val) ? low : prev_week_val
+prev_day_poc := na(prev_day_poc) ? hlc3 : prev_day_poc
+prev_day_vah := na(prev_day_vah) ? high : prev_day_vah
+prev_day_val := na(prev_day_val) ? low : prev_day_val
+
+// === PROXIMITY CHECKS ===
+proximity_pct = proximity_threshold / 100
+
+// Check if price is near key levels
+near_week_vah = math.abs(close - prev_week_vah) <= (prev_week_vah * proximity_pct)
+near_week_val = math.abs(close - prev_week_val) <= (prev_week_val * proximity_pct)
+near_week_poc = math.abs(close - prev_week_poc) <= (prev_week_poc * proximity_pct)
+near_day_vah = math.abs(close - prev_day_vah) <= (prev_day_vah * proximity_pct)
+near_day_val = math.abs(close - prev_day_val) <= (prev_day_val * proximity_pct)
+near_day_poc = math.abs(close - prev_day_poc) <= (prev_day_poc * proximity_pct)
+
+// Identify support and resistance zones
+at_support = near_week_val or near_day_val or (near_week_poc and close < prev_week_poc) or (near_day_poc and close < prev_day_poc)
+at_resistance = near_week_vah or near_day_vah or (near_week_poc and close > prev_week_poc) or (near_day_poc and close > prev_day_poc)
+
+// === CONFIRMATION INDICATORS ===
+// RSI
+rsi = ta.rsi(close, rsi_length)
+rsi_bullish = not use_rsi or (rsi > 35 and rsi < rsi_ob)
+rsi_bearish = not use_rsi or (rsi < 65 and rsi > rsi_os)
+
+// Volume
+vol_avg = ta.sma(volume, 20)
+vol_confirm = not use_volume or volume > vol_avg * vol_mult
+
+// ATR for stops
+atr = ta.atr(atr_length)
+
+// Price action confirmation
+bullish_candle = close > open and (close - open) > (high - low) * 0.5
+bearish_candle = close < open and (open - close) > (high - low) * 0.5
+
+// === ENTRY CONDITIONS ===
+// Long at support levels
+long_signal = in_session and at_support and bullish_candle and rsi_bullish and vol_confirm and 
+             (low <= math.min(prev_week_val, prev_day_val) * (1 + proximity_pct) and close > math.min(prev_week_val, prev_day_val))
+
+// Short at resistance levels  
+short_signal = in_session and at_resistance and bearish_candle and rsi_bearish and vol_confirm and
+              (high >= math.max(prev_week_vah, prev_day_vah) * (1 - proximity_pct) and close < math.max(prev_week_vah, prev_day_vah))
+
+// === TRADE MANAGEMENT ===
+var int daily_trades = 0
+new_day = ta.change(dayofmonth) != 0 or (hour == 0 and minute == 0)
+if new_day
+    daily_trades := 0
+
+// Dynamic Position Sizing
+max_risk_dollars = account_size * (risk_per_trade / 100)
+stop_loss_points = atr * atr_mult_sl
+stop_loss_dollars = stop_loss_points * mnq_point_value
+contracts_needed = math.floor(max_risk_dollars / stop_loss_dollars)
+position_contracts = math.max(min_contracts, math.min(max_contracts, contracts_needed))
+
+// === STRATEGY EXECUTION ===
+if long_signal and daily_trades < max_trades_per_day and strategy.position_size == 0
+    stop_price = close - (atr * atr_mult_sl)
+    take_profit = close + (atr * atr_mult_sl * risk_reward)
+    
+    strategy.entry("Long", strategy.long, qty=position_contracts)
+    strategy.exit("Long Exit", "Long", stop=stop_price, limit=take_profit)
+    daily_trades := daily_trades + 1
+    
+    alert('{"time":"' + str.tostring(time) + '","action":"buy","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(stop_price) + ',"tp":' + str.tostring(take_profit) + ',"qty":' + str.tostring(position_contracts) + '}', alert.freq_once_per_bar)
+
+if short_signal and daily_trades < max_trades_per_day and strategy.position_size == 0
+    stop_price = close + (atr * atr_mult_sl)
+    take_profit = close - (atr * atr_mult_sl * risk_reward)
+    
+    strategy.entry("Short", strategy.short, qty=position_contracts)
+    strategy.exit("Short Exit", "Short", stop=stop_price, limit=take_profit)
+    daily_trades := daily_trades + 1
+    
+    alert('{"time":"' + str.tostring(time) + '","action":"sell","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(stop_price) + ',"tp":' + str.tostring(take_profit) + ',"qty":' + str.tostring(position_contracts) + '}', alert.freq_once_per_bar)
+
+// === PLOTTING ===
+// Volume Profile Levels
+plot(prev_week_vah, "Prev Week VAH", color=color.red, linewidth=2, style=plot.style_line)
+plot(prev_week_val, "Prev Week VAL", color=color.green, linewidth=2, style=plot.style_line)
+plot(prev_week_poc, "Prev Week POC", color=color.blue, linewidth=2, style=plot.style_line)
+plot(prev_day_vah, "Prev Day VAH", color=color.orange, linewidth=1, style=plot.style_line)
+plot(prev_day_val, "Prev Day VAL", color=color.lime, linewidth=1, style=plot.style_line)
+plot(prev_day_poc, "Prev Day POC", color=color.aqua, linewidth=1, style=plot.style_line)
+
+// Highlight proximity zones
+bgcolor(at_support ? color.new(color.green, 90) : na, title="Support Zone")
+bgcolor(at_resistance ? color.new(color.red, 90) : na, title="Resistance Zone")
+
+// Trade signals
+plotshape(long_signal, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(short_signal, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Info table
+var table info_table = table.new(position.top_right, 2, 6, bgcolor=color.white, border_width=1)
+if barstate.islast
+    table.cell(info_table, 0, 0, "Daily Trades", text_color=color.black)
+    table.cell(info_table, 1, 0, str.tostring(daily_trades), text_color=color.black)
+    table.cell(info_table, 0, 1, "Position Size", text_color=color.black)
+    table.cell(info_table, 1, 1, str.tostring(position_contracts), text_color=color.black)
+    table.cell(info_table, 0, 2, "Week VAH", text_color=color.black)
+    table.cell(info_table, 1, 2, str.tostring(math.round(prev_week_vah, 2)), text_color=color.red)
+    table.cell(info_table, 0, 3, "Week VAL", text_color=color.black)
+    table.cell(info_table, 1, 3, str.tostring(math.round(prev_week_val, 2)), text_color=color.green)
+    table.cell(info_table, 0, 4, "Day VAH", text_color=color.black)
+    table.cell(info_table, 1, 4, str.tostring(math.round(prev_day_vah, 2)), text_color=color.orange)
+    table.cell(info_table, 0, 5, "Day VAL", text_color=color.black)
+    table.cell(info_table, 1, 5, str.tostring(math.round(prev_day_val, 2)), text_color=color.lime)
