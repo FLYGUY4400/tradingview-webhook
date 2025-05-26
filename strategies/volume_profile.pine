@@ -10,14 +10,20 @@ use_session = input.bool(true, "Use Trading Session", group="Session")
 session_time = input.session("0930-1600", "Trading Session", group="Session")
 in_session = not use_session or not na(time(timeframe.period, session_time))
 
+// Backtest Date Range
+use_date_filter = input.bool(true, "Use Date Filter", group="Backtest Range")
+start_date = input.time(timestamp("17 Jan 2025 09:30 +0000"), "Start Date", group="Backtest Range")
+end_date = input.time(timestamp("24 Jan 2025 16:00 +0000"), "End Date", group="Backtest Range")
+in_date_range = not use_date_filter or (time >= start_date and time <= end_date)
+
 // Volume Profile Settings - MANUAL INPUTS
 use_manual_levels = input.bool(true, "Use Manual VP Levels", group="Volume Profile Manual")
-manual_week_vah = input.float(21498.5, "Previous Week VAH", step=0.25, group="Volume Profile Manual")
-manual_week_val = input.float(21207.00, "Previous Week VAL", step=0.25, group="Volume Profile Manual")
-manual_week_poc = input.float(21342.75, "Previous Week POC", step=0.25, group="Volume Profile Manual")
-manual_day_vah = input.float(21295, "Previous Day VAH", step=0.25, group="Volume Profile Manual")
-manual_day_val = input.float(21200.5, "Previous Day VAL", step=0.25, group="Volume Profile Manual")
-manual_day_poc = input.float(21261.5, "Previous Day POC", step=0.25, group="Volume Profile Manual")
+manual_week_vah = input.float(21100, "Previous Week VAH", step=0.25, group="Volume Profile Manual")
+manual_week_val = input.float(20800, "Previous Week VAL", step=0.25, group="Volume Profile Manual")
+manual_week_poc = input.float(20950, "Previous Week POC", step=0.25, group="Volume Profile Manual")
+manual_day_vah = input.float(21050, "Previous Day VAH", step=0.25, group="Volume Profile Manual")
+manual_day_val = input.float(20900, "Previous Day VAL", step=0.25, group="Volume Profile Manual")
+manual_day_poc = input.float(20975, "Previous Day POC", step=0.25, group="Volume Profile Manual")
 
 proximity_threshold = input.float(0.3, "Proximity to Level (%)", step=0.01, group="Volume Profile Manual")
 update_levels_weekly = input.bool(false, "Auto-update Weekly Levels", group="Volume Profile Manual")
@@ -126,10 +132,10 @@ bearish_candle = close < open and (open - close) > (high - low) * 0.5
 
 // === ENTRY CONDITIONS ===
 // Trade bounces and rejections at manual VP levels
-long_signal = in_session and strategy.position_size == 0 and
+long_signal = in_session and in_date_range and
              at_support and close > open and rsi_bullish and vol_confirm
 
-short_signal = in_session and strategy.position_size == 0 and
+short_signal = in_session and in_date_range and
               at_resistance and close < open and rsi_bearish and vol_confirm
 
 // === TRADE MANAGEMENT ===
@@ -184,7 +190,7 @@ plotshape(long_signal, "Long Signal", shape.triangleup, location.belowbar, color
 plotshape(short_signal, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
 
 // Info table
-var table info_table = table.new(position.top_right, 2, 7, bgcolor=color.white, border_width=1)
+var table info_table = table.new(position.top_right, 2, 8, bgcolor=color.white, border_width=1)
 if barstate.islast
     table.cell(info_table, 0, 0, "Daily Trades", text_color=color.black)
     table.cell(info_table, 1, 0, str.tostring(daily_trades), text_color=color.black)
@@ -192,11 +198,13 @@ if barstate.islast
     table.cell(info_table, 1, 1, str.tostring(position_contracts), text_color=color.black)
     table.cell(info_table, 0, 2, "Week VAH", text_color=color.black)
     table.cell(info_table, 1, 2, str.tostring(week_vah), text_color=color.red)
-    table.cell(info_table, 0, 3, "Week VAL", text_color=color.black)
-    table.cell(info_table, 1, 3, str.tostring(week_val), text_color=color.green)
-    table.cell(info_table, 0, 4, "Week POC", text_color=color.black)
-    table.cell(info_table, 1, 4, str.tostring(week_poc), text_color=color.blue)
+    table.cell(info_table, 0, 3, "Week POC", text_color=color.black)
+    table.cell(info_table, 1, 3, str.tostring(week_poc), text_color=color.blue)
+    table.cell(info_table, 0, 4, "Week VAL", text_color=color.black)
+    table.cell(info_table, 1, 4, str.tostring(week_val), text_color=color.green)
     table.cell(info_table, 0, 5, "Day VAH", text_color=color.black)
     table.cell(info_table, 1, 5, str.tostring(day_vah), text_color=color.orange)
-    table.cell(info_table, 0, 6, "Day VAL", text_color=color.black)
-    table.cell(info_table, 1, 6, str.tostring(day_val), text_color=color.lime)
+    table.cell(info_table, 0, 6, "Day POC", text_color=color.black)
+    table.cell(info_table, 1, 6, str.tostring(day_poc), text_color=color.aqua)
+    table.cell(info_table, 0, 7, "Day VAL", text_color=color.black)
+    table.cell(info_table, 1, 7, str.tostring(day_val), text_color=color.lime)
