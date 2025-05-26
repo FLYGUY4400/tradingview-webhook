@@ -12,20 +12,20 @@ in_session = not use_session or not na(time(timeframe.period, session_time))
 
 // Backtest Date Range
 use_date_filter = input.bool(true, "Use Date Filter", group="Backtest Range")
-start_date = input.time(timestamp("17 Jan 2025 09:30 +0000"), "Start Date", group="Backtest Range")
-end_date = input.time(timestamp("24 Jan 2025 16:00 +0000"), "End Date", group="Backtest Range")
+start_date = input.time(timestamp("19 May 2025 09:30 +0000"), "Start Date", group="Backtest Range")
+end_date = input.time(timestamp("23 May 2025 16:00 +0000"), "End Date", group="Backtest Range")
 in_date_range = not use_date_filter or (time >= start_date and time <= end_date)
 
 // Volume Profile Settings - MANUAL INPUTS
 use_manual_levels = input.bool(true, "Use Manual VP Levels", group="Volume Profile Manual")
-manual_week_vah = input.float(21100, "Previous Week VAH", step=0.25, group="Volume Profile Manual")
-manual_week_val = input.float(20800, "Previous Week VAL", step=0.25, group="Volume Profile Manual")
-manual_week_poc = input.float(20950, "Previous Week POC", step=0.25, group="Volume Profile Manual")
-manual_day_vah = input.float(21050, "Previous Day VAH", step=0.25, group="Volume Profile Manual")
-manual_day_val = input.float(20900, "Previous Day VAL", step=0.25, group="Volume Profile Manual")
-manual_day_poc = input.float(20975, "Previous Day POC", step=0.25, group="Volume Profile Manual")
+manual_week_vah = input.float(21531.5, "Previous Week VAH", step=0.25, group="Volume Profile Manual")
+manual_week_poc = input.float(21410, "Previous Week POC", step=0.25, group="Volume Profile Manual")
+manual_week_val = input.float(21182.5, "Previous Week VAL", step=0.25, group="Volume Profile Manual")
+manual_day_vah = input.float(21010.25, "Previous Day VAH", step=0.25, group="Volume Profile Manual")
+manual_day_poc = input.float(20944.25, "Previous Day POC", step=0.25, group="Volume Profile Manual")
+manual_day_val = input.float(20844.75, "Previous Day VAL", step=0.25, group="Volume Profile Manual")
 
-proximity_threshold = input.float(0.3, "Proximity to Level (%)", step=0.01, group="Volume Profile Manual")
+proximity_threshold = input.float(0.8, "Proximity to Level (%)", step=0.01, group="Volume Profile Manual")
 update_levels_weekly = input.bool(false, "Auto-update Weekly Levels", group="Volume Profile Manual")
 update_levels_daily = input.bool(false, "Auto-update Daily Levels", group="Volume Profile Manual")
 
@@ -186,8 +186,8 @@ bgcolor(at_support ? color.new(color.green, 90) : na, title="Support Zone")
 bgcolor(at_resistance ? color.new(color.red, 90) : na, title="Resistance Zone")
 
 // Trade signals
-plotshape(long_signal, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.small)
-plotshape(short_signal, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
+// plotshape(long_signal, "Long Signal", shape.triangleup, location.belowbar, color.green, size=size.small)
+// plotshape(short_signal, "Short Signal", shape.triangledown, location.abovebar, color.red, size=size.small)
 
 // Info table
 var table info_table = table.new(position.top_right, 2, 8, bgcolor=color.white, border_width=1)
