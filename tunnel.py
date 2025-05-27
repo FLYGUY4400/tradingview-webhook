@@ -27,9 +27,28 @@ trades = []
 def home():
     return "TradingView Webhook Server is running! Use POST /webhook endpoint."
 
+def has_active_trades():
+    """Check if there are any active trades in trades.json"""
+    try:
+        trades_file = 'trades.json'
+        if os.path.exists(trades_file):
+            with open(trades_file, 'r') as f:
+                trades = json.load(f)
+                return bool(trades and any(t.get('action') in ['BUY', 'SELL'] for t in trades))
+    except Exception as e:
+        print(f"Error checking active trades: {e}")
+    return False
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
+        # Check for active trades first
+        if has_active_trades():
+            return jsonify({
+                "status": "error",
+                "message": "Active trade exists. Not adding new trade."
+            }), 200
+            
         print("\n=== New Webhook Request ===")
         print(f"Method: {request.method}")
         print(f"Content-Type: {request.content_type}")
