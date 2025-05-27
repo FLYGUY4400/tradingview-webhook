@@ -159,9 +159,9 @@ if long_signal and daily_trades < max_trades_per_day and strategy.position_size 
     strategy.entry("Long", strategy.long, qty=position_contracts)
     strategy.exit("Long Exit", "Long", stop=stop_price, limit=take_profit)
     daily_trades := daily_trades + 1
-    
-    alert('{"time":"' + str.tostring(time) + '","action":"buy","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(stop_price) + ',"tp":' + str.tostring(take_profit) + ',"qty":' + str.tostring(position_contracts) + '}', alert.freq_once_per_bar)
 
+    alert('action=BUY&symbol=' + syminfo.ticker + '&price=' + str.tostring(close) + '&tp=' + str.tostring(take_profit) + '&sl=' + str.tostring(stop_price) + '&quantity=' + str.tostring(position_contracts), alert.freq_once_per_bar)
+    
 if short_signal and daily_trades < max_trades_per_day and strategy.position_size == 0
     stop_price = close + (atr * atr_mult_sl)
     take_profit = close - (atr * atr_mult_sl * risk_reward)
@@ -170,8 +170,7 @@ if short_signal and daily_trades < max_trades_per_day and strategy.position_size
     strategy.exit("Short Exit", "Short", stop=stop_price, limit=take_profit)
     daily_trades := daily_trades + 1
     
-    alert('{"time":"' + str.tostring(time) + '","action":"sell","symbol":"' + syminfo.ticker + '","price":' + str.tostring(close) + ',"sl":' + str.tostring(stop_price) + ',"tp":' + str.tostring(take_profit) + ',"qty":' + str.tostring(position_contracts) + '}', alert.freq_once_per_bar)
-
+    alert('action=SELL&symbol=' + syminfo.ticker + '&price=' + str.tostring(close) + '&tp=' + str.tostring(take_profit) + '&sl=' + str.tostring(stop_price) + '&quantity=' + str.tostring(position_contracts), alert.freq_once_per_bar)    
 // === PLOTTING ===
 // Manual Volume Profile Levels
 plot(week_vah, "Week VAH", color=color.red, linewidth=3, style=plot.style_line)
