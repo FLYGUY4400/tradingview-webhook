@@ -142,8 +142,8 @@ class TVBot:
             return []
     
     def has_active_trades(self) -> bool:
-        """Check if there are any active trades"""
-        return any(trade["status"] == "OPEN" for trade in self.active_trades.values())
+        """Check if there are any active trades by checking for TP or SL orders"""
+        return self.active_orders['tp'] is not None or self.active_orders['sl'] is not None
 
     def clear_trades_file(self):
         """Clear the trades.json file"""
