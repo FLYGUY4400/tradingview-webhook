@@ -29,6 +29,12 @@ def home():
 
 def has_active_trades():
     """Check if there are any active trades in trades.json"""
+    # Always return False when starting the tunnel
+    import sys
+    if '--start-tunnel' in sys.argv:
+        print("Tunnel starting - forcing has_active_trades to False")
+        return False
+        
     try:
         trades_file = 'trades.json'
         if os.path.exists(trades_file):
